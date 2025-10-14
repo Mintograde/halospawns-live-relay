@@ -1,0 +1,5 @@
+.producer*
+.wrangler/
+.idea/
+.venv/
+node_modules/

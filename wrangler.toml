@@ -1,0 +1,17 @@
+name = "halospawns-live-relay"
+main = "src/worker.js"
+compatibility_date = "2025-10-02"
+
+[durable_objects]
+bindings = [
+  { name = "GAME_ROOMS", class_name = "GameRoom" }
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GameRoom"]
+
+[vars]
+ROOM_GRACE_MS = "15000"            # close consumers 15s after producer leaves
+PRODUCER_KEY_TTL_SEC = "86400"     # 24h producer key TTL
+REQUIRE_KEY_IN_MESSAGES = "false"  # true = every producer message must include "key"

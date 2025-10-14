@@ -1,0 +1,460 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>Consumer Test — DO Relay</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; max-width: 1000px; margin: 24px auto; padding: 0 16px; }
+  fieldset { border: 1px solid #ccc; margin: 12px 0; padding: 10px; }
+  legend { font-weight: 600; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+  .row > label { white-space: nowrap; }
+  input[type="text"], input[type="number"] { padding: 6px 8px; min-width: 180px; }
+  button { padding: 6px 10px; }
+  #statusBar { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; margin-top: 6px; }
+  .stat { border: 1px solid #ddd; padding: 6px 8px; border-radius: 6px; background: #fafafa; }
+  .stat b { display: block; font-size: 12px; color: #666; font-weight: 600; }
+  #log { height: 360px; overflow: auto; border: 1px solid #ccc; background: #0b1020; color: #e6e6e6; padding: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space: pre-wrap; }
+  .line { margin: 0; }
+  .lvl-sys    { color: #9aa4b2; }
+  .lvl-ev     { color: #8ad6ff; }
+  .lvl-recv   { color: #a6e22e; }
+  .lvl-send   { color: #ffd866; }
+  .lvl-error  { color: #ff6b6b; }
+  .badge { padding: 1px 6px; border-radius: 10px; font-size: 11px; font-weight: 600; margin-left: 6px; }
+  .ok { background: #d2f8d2; color: #0b6d0b; }
+  .warn { background: #fff3c4; color: #7a5c00; }
+  .bad { background: #ffd2d2; color: #7a0b0b; }
+  .muted { opacity: 0.7; }
+  .flex1 { flex: 1 1 auto; min-width: 140px; }
+  textarea { width: 100%; height: 90px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+</style>
+
+<h1>Durable Object Relay — Consumer Test</h1>
+
+<fieldset>
+  <legend>Connection</legend>
+  <div class="row">
+    <label>WS Origin:</label>
+    <input id="host" type="text" class="flex1" value="ws://127.0.0.1:8787" />
+    <label>Room:</label>
+    <input id="room" type="text" value="test-room" />
+    <button id="connect">Connect</button>
+    <button id="disconnect" disabled>Disconnect</button>
+    <span id="connState" class="badge">idle</span>
+  </div>
+  <div class="row">
+    <label><input id="autoReconnect" type="checkbox" checked /> Auto‑reconnect</label>
+    <label>Backoff ms (min/max):</label>
+    <input id="reMin" type="number" value="400" min="0" style="width:90px" />
+    <input id="reMax" type="number" value="8000" min="0" style="width:90px" />
+    <label><input id="reJitter" type="checkbox" checked /> Jitter</label>
+    <button id="reconnectNow" disabled>Reconnect now</button>
+  </div>
+  <div id="statusBar">
+    <div class="stat"><b>Status</b><span id="status">disconnected</span></div>
+    <div class="stat"><b>ReadyState</b><span id="readyState">-</span></div>
+    <div class="stat"><b>Has Producer</b><span id="hasProducer" class="badge muted">unknown</span></div>
+    <div class="stat"><b>BufferedAmount</b><span id="buffered">0</span></div>
+    <div class="stat"><b>Messages</b><span id="msgCount">0</span></div>
+    <div class="stat"><b>Bytes</b><span id="byteCount">0</span></div>
+    <div class="stat"><b>First/Last Msg</b><span id="msgTimes" class="muted">–</span></div>
+  </div>
+</fieldset>
+
+<fieldset>
+  <legend>Controls</legend>
+  <div class="row">
+    <button id="sendPing" disabled>Send "ping"</button>
+    <button id="sendBinary" disabled>Send binary 256B</button>
+    <label>Auto‑ping every</label>
+    <input id="pingSec" type="number" value="0" min="0" step="1" style="width:80px" />
+    <span>sec (0 = off)</span>
+  </div>
+  <div style="margin-top:8px">
+    <label>Send custom JSON (server may ignore for consumers):</label>
+    <textarea id="jsonInput">{ "type": "hello", "note": "consumer test" }</textarea>
+    <div class="row" style="margin-top:6px">
+      <button id="sendJSON" disabled>Send JSON</button>
+      <span class="muted">Note: your DO treats consumers as read‑only except simple strings like "ping".</span>
+    </div>
+  </div>
+</fieldset>
+
+<fieldset>
+  <legend>Room Info</legend>
+  <div class="row">
+    <button id="fetchInfo">Fetch /info</button>
+    <label><input id="pollInfo" type="checkbox" /> Poll every</label>
+    <input id="pollSec" type="number" value="5" min="1" style="width:70px" />
+    <span>sec</span>
+    <span id="infoSummary" class="muted">—</span>
+  </div>
+</fieldset>
+
+<fieldset>
+  <legend>Log</legend>
+  <div class="row">
+    <button id="clearLog">Clear</button>
+    <button id="copyLog">Copy</button>
+    <button id="downloadLog">Download</button>
+    <label>Max lines:</label>
+    <input id="maxLines" type="number" value="1000" min="100" step="100" style="width:90px" />
+    <label><input id="pauseLog" type="checkbox" /> Pause</label>
+    <label><input id="fSys" type="checkbox" checked /> sys</label>
+    <label><input id="fEv" type="checkbox" checked /> events</label>
+    <label><input id="fRecv" type="checkbox" checked /> recv</label>
+    <label><input id="fSend" type="checkbox" checked /> send</label>
+    <label><input id="fErr" type="checkbox" checked /> errors</label>
+  </div>
+  <div id="log" aria-live="polite"></div>
+</fieldset>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const S = {
+    ws: null,
+    manualClose: false,
+    reconnectTimer: null,
+    pingTimer: null,
+    infoTimer: null,
+    msgCount: 0,
+    byteCount: 0,
+    firstMsgAt: null,
+    lastMsgAt: null,
+    filters: { sys: true, ev: true, recv: true, send: true, err: true },
+  };
+
+  const LS_KEYS = ["host","room","autoReconnect","reMin","reMax","reJitter","pingSec","pollInfo","pollSec","maxLines"];
+  function loadPrefs() {
+    try {
+      LS_KEYS.forEach(k => {
+        const el = $(k);
+        const v = localStorage.getItem("cons:"+k);
+        if (v == null) return;
+        if (el?.type === "checkbox") el.checked = v === "true";
+        else if (el) el.value = v;
+      });
+    } catch {}
+  }
+  function savePref(id) {
+    const el = $(id);
+    try {
+      localStorage.setItem("cons:"+id, el.type === "checkbox" ? String(el.checked) : el.value);
+    } catch {}
+  }
+  loadPrefs();
+  for (const k of LS_KEYS) {
+    const el = $(k);
+    if (el) el.addEventListener("change", () => savePref(k));
+  }
+
+  function fmtTime(ts = Date.now()) {
+    const d = new Date(ts);
+    return d.toLocaleTimeString([], { hour12: false }) + "." + String(d.getMilliseconds()).padStart(3,"0");
+  }
+  function shouldShow(level) {
+    return {
+      sys: $("fSys").checked,
+      ev:  $("fEv").checked,
+      recv:$("fRecv").checked,
+      send:$("fSend").checked,
+      err: $("fErr").checked,
+    }[level];
+  }
+  function log(line, level = "sys") {
+    if ($("pauseLog").checked) return;
+    if (!shouldShow(level)) return;
+    const el = document.createElement("div");
+    el.className = `line lvl-${level}`;
+    el.textContent = `[${fmtTime()}] ${line}`;
+    $("log").appendChild(el);
+    const max = parseInt($("maxLines").value || "1000", 10);
+    const logEl = $("log");
+    while (logEl.childNodes.length > max) logEl.removeChild(logEl.firstChild);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  function setStatus(txt) { $("status").textContent = txt; }
+  function setConnBadge(txt, cls = "") {
+    const b = $("connState");
+    b.textContent = txt;
+    b.className = "badge " + cls;
+  }
+  function setHasProducer(has) {
+    const el = $("hasProducer");
+    if (has === true) { el.textContent = "true"; el.className = "badge ok"; }
+    else if (has === false) { el.textContent = "false"; el.className = "badge bad"; }
+    else { el.textContent = "unknown"; el.className = "badge muted"; }
+  }
+  function updateReadyState() {
+    const m = { 0:"CONNECTING",1:"OPEN",2:"CLOSING",3:"CLOSED" };
+    $("readyState").textContent = S.ws ? m[S.ws.readyState] : "-";
+    $("buffered").textContent = S.ws ? String(S.ws.bufferedAmount) : "0";
+  }
+  function httpOriginFromWs(wsOrigin) {
+    try {
+      const u = new URL(wsOrigin);
+      u.protocol = (u.protocol === "wss:") ? "https:" : "http:";
+      return u.origin;
+    } catch {
+      return wsOrigin.replace(/^wss:\/\//, "https://").replace(/^ws:\/\//, "http://");
+    }
+  }
+
+  function noteBytes(n) {
+    S.byteCount += n;
+    $("byteCount").textContent = String(S.byteCount);
+  }
+  function noteMessage(ts = Date.now()) {
+    S.msgCount++;
+    $("msgCount").textContent = String(S.msgCount);
+    if (!S.firstMsgAt) S.firstMsgAt = ts;
+    S.lastMsgAt = ts;
+    $("msgTimes").textContent =
+      `${new Date(S.firstMsgAt).toLocaleTimeString()} → ${new Date(S.lastMsgAt).toLocaleTimeString()}`;
+  }
+  function resetCounters() {
+    S.msgCount = 0; S.byteCount = 0; S.firstMsgAt = null; S.lastMsgAt = null;
+    $("msgCount").textContent = "0"; $("byteCount").textContent = "0"; $("msgTimes").textContent = "–";
+  }
+
+  function buildUrl() {
+    const host = $("host").value.trim() || "ws://127.0.0.1:8787";
+    const room = $("room").value.trim() || "test-room";
+    return `${host.replace(/\/+$/,"")}/ws/${encodeURIComponent(room)}?role=consumer`;
+  }
+
+  function connect() {
+    if (S.ws && S.ws.readyState === 1) return;
+    S.manualClose = false;
+    const url = buildUrl();
+    setStatus("connecting…");
+    setConnBadge("connecting", "warn");
+    log(`connecting to ${url}`, "sys");
+
+    try { if (S.reconnectTimer) { clearTimeout(S.reconnectTimer); S.reconnectTimer = null; } } catch {}
+
+    const ws = new WebSocket(url);
+    S.ws = ws;
+    ws.binaryType = "arraybuffer";
+    $("connect").disabled = true;
+    $("disconnect").disabled = false;
+    $("reconnectNow").disabled = true;
+
+    ws.onopen = () => {
+      setStatus("connected");
+      setConnBadge("open", "ok");
+      setHasProducer(undefined);
+      resetCounters();
+      log(`open`, "ev");
+      startAutoPing();
+    };
+
+    ws.onmessage = (ev) => {
+      const bytes = typeof ev.data === "string" ? new TextEncoder().encode(ev.data).length
+                                               : (ev.data?.byteLength ?? 0);
+      noteBytes(bytes);
+      noteMessage();
+
+      if (typeof ev.data === "string") {
+        try {
+          const obj = JSON.parse(ev.data);
+          const t = obj?.type;
+          if (t === "welcome") {
+            setHasProducer(!!obj.hasProducer);
+            log(`recv welcome: ${JSON.stringify(obj)}`, "recv");
+          } else if (t === "producer_joined") {
+            setHasProducer(true);
+            log(`event producer_joined ${obj.at ? "(at "+new Date(obj.at).toLocaleTimeString()+")":""}`, "ev");
+          } else if (t === "producer_left") {
+            setHasProducer(false);
+            log(`event producer_left; willCloseInMs=${obj.willCloseInMs}`, "ev");
+          } else if (t === "room_closed") {
+            log(`event room_closed`, "ev");
+          } else if (t === "error") {
+            log(`server error: ${obj.code || JSON.stringify(obj)}`, "err");
+          } else {
+            log(`msg JSON: ${JSON.stringify(obj)}`, "recv");
+          }
+        } catch {
+          log(`msg text: ${ev.data}`, "recv");
+        }
+      } else if (ev.data instanceof ArrayBuffer) {
+        log(`msg binary: ${ev.data.byteLength} bytes`, "recv");
+      } else {
+        log(`msg (unknown type)`, "recv");
+      }
+      updateReadyState();
+    };
+
+    ws.onclose = (ev) => {
+      stopAutoPing();
+      const msg = `closed code=${ev.code} reason=${ev.reason || "(none)"} clean=${ev.wasClean}`;
+      log(msg, ev.code === 1000 ? "ev" : "err");
+      setStatus("disconnected");
+      setConnBadge("closed", "bad");
+      $("connect").disabled = false;
+      $("disconnect").disabled = true;
+      $("reconnectNow").disabled = false;
+      setHasProducer(false);
+      updateReadyState();
+      scheduleReconnect();
+    };
+
+    ws.onerror = (err) => {
+      log(`error: ${err?.message || err}`, "err");
+      updateReadyState();
+    };
+
+    const raf = () => {
+      if (S.ws === ws && ws.readyState !== 3) {
+        updateReadyState();
+        requestAnimationFrame(raf);
+      }
+    };
+    requestAnimationFrame(raf);
+  }
+
+  function disconnect(code = 1000, reason = "Client closing") {
+    S.manualClose = true;
+    try { if (S.reconnectTimer) clearTimeout(S.reconnectTimer); } catch {}
+    S.reconnectTimer = null;
+    stopAutoPing();
+    if (S.ws) {
+      log(`closing (client) code=${code} reason=${reason}`, "sys");
+      try { S.ws.close(code, reason); } catch {}
+    }
+  }
+
+  function scheduleReconnect() {
+    if (S.manualClose) return;
+    if (!$("autoReconnect").checked) return;
+    const min = Math.max(0, parseInt($("reMin").value || "400", 10));
+    const max = Math.max(min, parseInt($("reMax").value || "8000", 10));
+    const jitter = $("reJitter").checked;
+    const delay = calcBackoff(min, max, jitter);
+    setConnBadge(`reconnect in ${delay}ms`, "warn");
+    S.reconnectTimer = setTimeout(() => connect(), delay);
+  }
+  let backoffAttempt = 0;
+  function calcBackoff(min, max, jitter) {
+    backoffAttempt = Math.min(backoffAttempt + 1, 10);
+    let d = Math.min(max, min * Math.pow(2, backoffAttempt - 1));
+    if (jitter) d = Math.floor(d/2 + Math.random() * d/2);
+    return d;
+  }
+  function resetBackoff() { backoffAttempt = 0; }
+
+  function startAutoPing() {
+    stopAutoPing();
+    const sec = parseInt($("pingSec").value || "0", 10);
+    if (!sec || !S.ws || S.ws.readyState !== 1) return;
+    S.pingTimer = setInterval(() => {
+      if (S.ws && S.ws.readyState === 1) {
+        S.ws.send("ping");
+        log(`send "ping"`, "send");
+      }
+    }, sec * 1000);
+  }
+  function stopAutoPing() { if (S.pingTimer) { clearInterval(S.pingTimer); S.pingTimer = null; } }
+
+  async function fetchInfoOnce() {
+    const host = $("host").value.trim() || "ws://127.0.0.1:8787";
+    const httpOrigin = httpOriginFromWs(host);
+    const room = $("room").value.trim() || "test-room";
+    const url = `${httpOrigin}/rooms/${encodeURIComponent(room)}/info`;
+    try {
+      const r = await fetch(url, { cache: "no-store" });
+      const j = await r.json();
+      $("infoSummary").textContent = `consumers=${j.consumers} producers=${j.producers} hasProducer=${j.hasProducer} keyExp=${j.producerKeyExpiresAt ?? "null"}`;
+      setHasProducer(!!j.hasProducer);
+      log(`info ${JSON.stringify(j)}`, "sys");
+    } catch (e) {
+      $("infoSummary").textContent = "error fetching info";
+      log(`info fetch error: ${e}`, "err");
+    }
+  }
+  function startInfoPoll() {
+    stopInfoPoll();
+    if (!$("pollInfo").checked) return;
+    const sec = Math.max(1, parseInt($("pollSec").value || "5", 10));
+    S.infoTimer = setInterval(fetchInfoOnce, sec * 1000);
+  }
+  function stopInfoPoll() {
+    if (S.infoTimer) { clearInterval(S.infoTimer); S.infoTimer = null; }
+  }
+
+  function sendPing() {
+    if (S.ws && S.ws.readyState === 1) {
+      S.ws.send("ping");
+      log(`send "ping"`, "send");
+    }
+  }
+  function sendJSON() {
+    if (!S.ws || S.ws.readyState !== 1) return;
+    let payload;
+    try {
+      payload = JSON.parse($("jsonInput").value);
+    } catch (e) {
+      log(`invalid JSON: ${e}`, "err");
+      return;
+    }
+    try {
+      const s = JSON.stringify(payload);
+      S.ws.send(s);
+      log(`send JSON: ${s}`, "send");
+    } catch (e) {
+      log(`send error: ${e}`, "err");
+    }
+  }
+  function sendBinary() {
+    if (!S.ws || S.ws.readyState !== 1) return;
+    const buf = new Uint8Array(256);
+    for (let i = 0; i < buf.length; i++) buf[i] = i & 0xff;
+    S.ws.send(buf);
+    log(`send binary: ${buf.byteLength} bytes`, "send");
+  }
+
+  $("clearLog").onclick = () => { $("log").textContent = ""; };
+  $("copyLog").onclick = async () => {
+    const lines = Array.from($("log").childNodes).map(n => n.textContent).join("\n");
+    try { await navigator.clipboard.writeText(lines); log("copied log to clipboard", "sys"); } catch (e) { log(`copy failed: ${e}`, "err"); }
+  };
+  $("downloadLog").onclick = () => {
+    const lines = Array.from($("log").childNodes).map(n => n.textContent).join("\n");
+    const blob = new Blob([lines], { type: "text/plain" });
+    const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: `consumer-log-${Date.now()}.txt` });
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  $("connect").onclick = () => { resetBackoff(); connect(); };
+  $("disconnect").onclick = () => { disconnect(); };
+  $("reconnectNow").onclick = () => { resetBackoff(); connect(); };
+  $("sendPing").onclick = sendPing;
+  $("sendBinary").onclick = sendBinary;
+  $("sendJSON").onclick = sendJSON;
+  $("fetchInfo").onclick = fetchInfoOnce;
+  $("pollInfo").addEventListener("change", startInfoPoll);
+  $("pingSec").addEventListener("change", () => { if (S.ws?.readyState === 1) startAutoPing(); });
+
+  const enableControls = (on) => {
+    $("sendPing").disabled = !on;
+    $("sendBinary").disabled = !on;
+    $("sendJSON").disabled = !on;
+  };
+
+  const obs = new MutationObserver(() => enableControls(S.ws?.readyState === 1));
+  obs.observe($("readyState"), { childList: true });
+
+  setStatus("disconnected");
+  setConnBadge("idle", "");
+  enableControls(false);
+  setHasProducer(undefined);
+  startInfoPoll();
+
+  window.addEventListener("beforeunload", () => { try { S.ws?.close(1001, "Page unload"); } catch {} });
+
+})();
+</script>
