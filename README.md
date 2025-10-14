@@ -1,6 +1,6 @@
 # HaloSpawns Live Relay
 
-A Cloudflare worker websocket relay, supporting the live spectating features of halospawns.com.
+Websocket server in a Cloudflare worker for the live game spectating feature on halospawns.com
 
 ## Install
 ```
@@ -12,7 +12,7 @@ wrangler login
 ```
 wrangler dev
 ```
-Local WS origin: ws://127.0.0.1:8787
+Local WS origin: `ws://127.0.0.1:8787`
 
 ## Deploy
 ```
@@ -25,8 +25,8 @@ wrangler deploy
 
 ## Examples
 - Producer:
-  - pip install websockets
-  - python examples/producer.py --room demo-room
+  - `pip install websockets`
+  - `python examples/producer.py --room demo-room`
 - Consumer:
-  - Open examples/consumer.html in a browser
-  - Host: ws://127.0.0.1:8787, Room: demo-room
+  - Open `examples/consumer.html` in a browser
+  - Host: `ws://127.0.0.1:8787`, Room: demo-room
