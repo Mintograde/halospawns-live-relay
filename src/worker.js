@@ -39,10 +39,19 @@ export class GameRoom {
     this.REQUIRE_KEY = (env.REQUIRE_KEY_IN_MESSAGES ?? "false") === "true";
     this.MAX_BUFFER = parseInt(env.MAX_BUFFER_BYTES ?? "1048576", 10); // 1 MiB
 
+    this.DEFAULT_SETTINGS = { buffer_messages: false, compress_messages: false };
+    this.settings = { ...this.DEFAULT_SETTINGS };
+
     this.state.blockConcurrencyWhile(async () => {
       const rec = await this.storage.get("producer");
       this.producerKey = rec?.key ?? null;
       this.keyExpiresAt = rec?.expiresAt ?? null;
+
+      const savedSettings = await this.storage.get("settings");
+      if (savedSettings && typeof savedSettings === "object") {
+        this.settings = { ...this.DEFAULT_SETTINGS, ...savedSettings };
+      }
+
       try { this.state.setWebSocketAutoResponse({ request: "ping", response: "pong" }); } catch {}
     });
   }
@@ -71,6 +80,22 @@ export class GameRoom {
       try { ws.send(payload); } catch {}
     }
   }
+  _parseBool(v, fallback = null) {
+    if (v === undefined || v === null) return fallback;
+    if (typeof v === "boolean") return v;
+    const s = String(v).trim().toLowerCase();
+    if (["1","true","t","yes","y","on"].includes(s)) return true;
+    if (["0","false","f","no","n","off"].includes(s)) return false;
+    return fallback;
+  }
+  async _setSettings(partial) {
+    const merged = { ...this.DEFAULT_SETTINGS, ...this.settings, ...partial };
+    if ("buffer_messages" in merged) merged.buffer_messages = !!merged.buffer_messages;
+    if ("compress_messages" in merged) merged.compress_messages = !!merged.compress_messages;
+
+    this.settings = merged;
+    await this.storage.put("settings", this.settings);
+  }
 
   async fetch(request) {
     const url = new URL(request.url);
@@ -83,6 +108,7 @@ export class GameRoom {
           producers: this._sockets("producer").length,
           producerKeyExpiresAt: this.keyExpiresAt ?? null,
           hasProducer: this._hasProducer(),
+          settings: this.settings,
         };
         return new Response(JSON.stringify(info), { headers: { "content-type": "application/json" } });
       }
@@ -102,7 +128,21 @@ export class GameRoom {
       }
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
-      server.serializeAttachment({ role: "producer", connectedAt: this._now() });
+
+      const qBuffer = this._parseBool(url.searchParams.get("buffer_messages"));
+      const qCompress = this._parseBool(url.searchParams.get("compress_messages"));
+      if (qBuffer !== null || qCompress !== null) {
+        await this._setSettings({
+          ...(qBuffer !== null ? { buffer_messages: qBuffer } : {}),
+          ...(qCompress !== null ? { compress_messages: qCompress } : {}),
+        });
+      }
+
+      server.serializeAttachment({
+        role: "producer",
+        connectedAt: this._now(),
+        settings: this.settings,
+      });
       this.state.acceptWebSocket(server, ["producer"]);
 
       for (const w of existing) { try { w.close(4001, "Producer replaced"); } catch {} }
@@ -118,8 +158,9 @@ export class GameRoom {
         type: "welcome", role: "producer",
         roomId: this._roomId(url, request.headers),
         producerKey: this.producerKey, expiresAt: this.keyExpiresAt,
+        settings: this.settings,
       });
-      this._broadcast("consumer", { type: "producer_joined", at: this._now() });
+      this._broadcast("consumer", { type: "producer_joined", settings: this.settings, at: this._now() });
 
       return new Response(null, { status: 101, webSocket: client });
     }
@@ -133,6 +174,7 @@ export class GameRoom {
       type: "welcome", role: "consumer",
       roomId: this._roomId(url, request.headers),
       hasProducer: this._hasProducer(),
+      settings: this.settings,
     });
     return new Response(null, { status: 101, webSocket: client });
   }
@@ -140,18 +182,41 @@ export class GameRoom {
   async webSocketMessage(ws, message) {
     const meta = ws.deserializeAttachment() || {};
     if (meta.role !== "producer") return;
+
+    let obj = undefined;
+    let original = message;
+
+    if (typeof message === "string") {
+      try { obj = JSON.parse(message); } catch { }
+    }
+
     if (this.REQUIRE_KEY) {
-      if (typeof message !== "string") {
+      if (typeof message !== "string" || typeof obj !== "object" || obj === null) {
         this._sendJson(ws, { type: "error", code: "BAD_FORMAT" });
         return;
       }
-      let obj;
-      try { obj = JSON.parse(message); } catch { this._sendJson(ws, { type: "error", code: "BAD_FORMAT" }); return; }
       if (!this._isKeyValid(obj.key)) { this._sendJson(ws, { type: "error", code: "BAD_KEY" }); return; }
       delete obj.key;
-      message = JSON.stringify(obj);
+      original = JSON.stringify(obj);
     }
-    this._broadcast("consumer", message);
+
+    if (obj && obj.type === "settings") {
+      const next = {
+        ...(obj.buffer_messages !== undefined ? { buffer_messages: !!obj.buffer_messages } : {}),
+        ...(obj.compress_messages !== undefined ? { compress_messages: !!obj.compress_messages } : {}),
+      };
+      if (Object.keys(next).length === 0) {
+        this._sendJson(ws, { type: "error", code: "EMPTY_SETTINGS" });
+        return;
+      }
+      await this._setSettings(next);
+      try { ws.serializeAttachment({ ...meta, settings: this.settings }); } catch {}
+      this._sendJson(ws, { type: "settings_ok", settings: this.settings });
+      this._broadcast("consumer", { type: "settings_updated", settings: this.settings, at: this._now() });
+      return;
+    }
+
+    this._broadcast("consumer", original);
   }
 
   async webSocketClose(ws, code, reason, wasClean) {
