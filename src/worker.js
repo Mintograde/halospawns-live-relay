@@ -39,7 +39,7 @@ export class GameRoom {
     this.REQUIRE_KEY = (env.REQUIRE_KEY_IN_MESSAGES ?? "false") === "true";
     this.MAX_BUFFER = parseInt(env.MAX_BUFFER_BYTES ?? "1048576", 10); // 1 MiB
 
-    this.DEFAULT_SETTINGS = { buffer_messages: false, compress_messages: false };
+    this.DEFAULT_SETTINGS = { buffer_messages: false, compress_messages: false, compress_messages_binary: false };
     this.settings = { ...this.DEFAULT_SETTINGS };
 
     this.state.blockConcurrencyWhile(async () => {
@@ -92,6 +92,7 @@ export class GameRoom {
     const merged = { ...this.DEFAULT_SETTINGS, ...this.settings, ...partial };
     if ("buffer_messages" in merged) merged.buffer_messages = !!merged.buffer_messages;
     if ("compress_messages" in merged) merged.compress_messages = !!merged.compress_messages;
+    if ("compress_messages_binary" in merged) merged.compress_messages_binary = !!merged.compress_messages_binary;
 
     this.settings = merged;
     await this.storage.put("settings", this.settings);
@@ -131,10 +132,12 @@ export class GameRoom {
 
       const qBuffer = this._parseBool(url.searchParams.get("buffer_messages"));
       const qCompress = this._parseBool(url.searchParams.get("compress_messages"));
-      if (qBuffer !== null || qCompress !== null) {
+      const qCompressBinary = this._parseBool(url.searchParams.get("compress_messages_binary"));
+      if (qBuffer !== null || qCompress !== null || qCompressBinary !== null) {
         await this._setSettings({
           ...(qBuffer !== null ? { buffer_messages: qBuffer } : {}),
           ...(qCompress !== null ? { compress_messages: qCompress } : {}),
+          ...(qCompressBinary !== null ? { compress_messages_binary: qCompressBinary } : {}),
         });
       }
 
@@ -204,6 +207,7 @@ export class GameRoom {
       const next = {
         ...(obj.buffer_messages !== undefined ? { buffer_messages: !!obj.buffer_messages } : {}),
         ...(obj.compress_messages !== undefined ? { compress_messages: !!obj.compress_messages } : {}),
+        ...(obj.compress_messages_binary !== undefined ? { compress_messages_binary: !!obj.compress_messages_binary } : {}),
       };
       if (Object.keys(next).length === 0) {
         this._sendJson(ws, { type: "error", code: "EMPTY_SETTINGS" });
