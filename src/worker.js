@@ -19,9 +19,7 @@ export default {
     if (infoMatch) {
       const roomId = decodeURIComponent(infoMatch.pathname.groups.roomId);
       const id = env.GAME_ROOMS.idFromName(roomId);
-      const req = new Request(request, { headers: new Headers(request.headers) });
-      req.headers.set("X-Room-Id", roomId);
-      return env.GAME_ROOMS.get(id).fetch(req);
+      return env.GAME_ROOMS.get(id).fetch(request);
     }
 
     return new Response("Not found", { status: 404 });
@@ -156,6 +154,7 @@ export class GameRoom {
       this.keyExpiresAt = this._now() + this.KEY_TTL_MS;
       await this.storage.put("producer", { key: this.producerKey, expiresAt: this.keyExpiresAt });
       await this.storage.deleteAlarm();
+      this.pendingCloseAt = null;
 
       this._sendJson(server, {
         type: "welcome", role: "producer",
@@ -190,7 +189,10 @@ export class GameRoom {
     let original = message;
 
     if (typeof message === "string") {
-      try { obj = JSON.parse(message); } catch { }
+      // PERF: avoid parsing game messages as json by assuming magic length... there's probably a better way to do this
+      if (this.REQUIRE_KEY || message.length < 2048) {
+        try { obj = JSON.parse(message); } catch { }
+      }
     }
 
     if (this.REQUIRE_KEY) {
