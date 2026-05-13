@@ -15,3 +15,6 @@ new_sqlite_classes = ["GameRoom"]
 ROOM_GRACE_MS = "15000"            # close consumers 15s after producer leaves
 PRODUCER_KEY_TTL_SEC = "86400"     # 24h producer key TTL
 REQUIRE_KEY_IN_MESSAGES = "false"  # true = every producer message must include "key"
+APP_API_BASE_URL = "https://api.dev.halospawns.com"
+APP_API_HMAC_CLIENT = "live-relay"
+LIVE_STATUS_UPDATE_INTERVAL_MS = "10000"
