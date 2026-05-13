@@ -2,19 +2,36 @@ name = "halospawns-live-relay"
 main = "src/worker.js"
 compatibility_date = "2025-10-02"
 
-[durable_objects]
-bindings = [
-  { name = "GAME_ROOMS", class_name = "GameRoom" }
-]
-
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["GameRoom"]
 
-[vars]
+[env.dev]
+name = "halospawns-live-relay-dev"
+
+[[env.dev.durable_objects.bindings]]
+name = "GAME_ROOMS"
+class_name = "GameRoom"
+
+[env.dev.vars]
 ROOM_GRACE_MS = "15000"            # close consumers 15s after producer leaves
 PRODUCER_KEY_TTL_SEC = "86400"     # 24h producer key TTL
 REQUIRE_KEY_IN_MESSAGES = "false"  # true = every producer message must include "key"
 APP_API_BASE_URL = "https://api.dev.halospawns.com"
+APP_API_HMAC_CLIENT = "live-relay"
+LIVE_STATUS_UPDATE_INTERVAL_MS = "10000"
+
+[env.prod]
+name = "halospawns-live-relay-prod"
+
+[[env.prod.durable_objects.bindings]]
+name = "GAME_ROOMS"
+class_name = "GameRoom"
+
+[env.prod.vars]
+ROOM_GRACE_MS = "15000"            # close consumers 15s after producer leaves
+PRODUCER_KEY_TTL_SEC = "86400"     # 24h producer key TTL
+REQUIRE_KEY_IN_MESSAGES = "false"  # true = every producer message must include "key"
+APP_API_BASE_URL = "https://api.halospawns.com"
 APP_API_HMAC_CLIENT = "live-relay"
 LIVE_STATUS_UPDATE_INTERVAL_MS = "10000"

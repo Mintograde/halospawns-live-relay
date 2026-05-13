@@ -10,14 +10,24 @@ wrangler login
 
 ## Test Locally
 ```
-wrangler dev
+wrangler dev --env dev
 ```
 Local WS origin: `ws://127.0.0.1:8787`
 
+## Secrets
+Set the API HMAC secret separately for each deployed environment:
+```
+wrangler secret put APP_API_HMAC_SECRET --env dev
+wrangler secret put APP_API_HMAC_SECRET --env prod
+```
+
 ## Deploy
 ```
-wrangler deploy
+wrangler deploy --env dev
+wrangler deploy --env prod
 ```
+
+The `dev` and `prod` environments deploy as separate Workers with separate Durable Object storage.
 
 ## Endpoints
 - `WS /ws/:roomId` -> one producer per room, enforced by key returned from initial producer connection
